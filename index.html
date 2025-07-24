@@ -59,7 +59,7 @@
             font-weight: 300;
         }
 
-        /* Model Selection Button - NEW POSITION (LEFT SIDE) */
+        /* Model Selection Button */
         .model-btn {
             position: absolute;
             left: 20px;
@@ -131,6 +131,31 @@
 
         .hamburger-btn.active .hamburger-line:nth-child(3) {
             transform: rotate(-45deg) translate(7px, -6px);
+        }
+
+        /* Connection Status */
+        .connection-status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-online {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .status-offline {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
         }
 
         /* Model Selection Modal */
@@ -759,6 +784,35 @@
             cursor: not-allowed;
         }
 
+        /* Error Message */
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 10px 0;
+            color: #ef4444;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .retry-btn {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 6px;
+            padding: 4px 8px;
+            color: #ef4444;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .retry-btn:hover {
+            background: rgba(239, 68, 68, 0.3);
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .chat-container {
@@ -858,11 +912,14 @@
     <div class="chat-container">
         <!-- Header -->
         <div class="chat-header">
-            <!-- Model Selection Button - NEW POSITION (LEFT SIDE) -->
+            <!-- Model Selection Button -->
             <button class="model-btn" id="modelBtn">Sky</button>
             
             <h1>Sky GPT</h1>
             <p>Your Intelligent Assistant</p>
+            
+            <!-- Connection Status -->
+            <div class="connection-status status-online" id="connectionStatus">Online</div>
             
             <!-- Hamburger Menu Button -->
             <button class="hamburger-btn" id="hamburgerBtn">
@@ -904,6 +961,10 @@
                 <span>Sky GPT</span>
                 <span class="model-status status-available">Available</span>
             </button>
+            <button class="model-option" data-model="demo">
+                <span>Demo Mode</span>
+                <span class="model-status status-available">Offline</span>
+            </button>
             <button class="model-option disabled" data-model="researching">
                 <span>Researching</span>
                 <span class="model-status status-unavailable">Coming Soon</span>
@@ -911,10 +972,6 @@
             <button class="model-option disabled" data-model="reasoning">
                 <span>Reasoning</span>
                 <span class="model-status status-unavailable">Coming Soon</span>
-            </button>
-            <button class="model-option" data-model="canva">
-                <span>Canva</span>
-                <span class="model-status status-available">Available</span>
             </button>
         </div>
     </div>
@@ -954,6 +1011,7 @@
                 this.newChatBtn = document.getElementById('newChatBtn');
                 this.backBtn = document.getElementById('backBtn');
                 this.chatList = document.getElementById('chatList');
+                this.connectionStatus = document.getElementById('connectionStatus');
                 
                 // Storage keys
                 this.STORAGE_KEY = 'skygpt_conversation_history';
@@ -961,9 +1019,27 @@
                 this.CURRENT_CHAT_KEY = 'skygpt_current_chat_id';
                 this.CURRENT_MODEL_KEY = 'skygpt_current_model';
                 
-                // API Configuration
-                this.apiBaseUrl = 'https://gpt-3-5.apis-bj-devs.workers.dev/';
-                this.imageApiUrl = 'https://botfather.cloud/Apis/ImgGen/client.php';
+                // API Configuration with CORS proxies and fallbacks
+                this.apiConfigs = {
+                    primary: {
+                        url: 'https://gpt-3-5.apis-bj-devs.workers.dev/',
+                        proxy: false
+                    },
+                    corsProxy1: {
+                        url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://gpt-3-5.apis-bj-devs.workers.dev/'),
+                        proxy: true
+                    },
+                    corsProxy2: {
+                        url: 'https://cors-anywhere.herokuapp.com/https://gpt-3-5.apis-bj-devs.workers.dev/',
+                        proxy: true
+                    },
+                    demo: {
+                        url: 'demo',
+                        proxy: false
+                    }
+                };
+                
+                this.currentApiConfig = this.apiConfigs.primary;
                 this.systemPrompt = 'you are a advance pro bot made by aakash you need to give answer like professional not give all answers give only main answer';
                 
                 this.isProcessing = false;
@@ -971,6 +1047,17 @@
                 this.currentChatId = this.getCurrentChatId();
                 this.allChats = this.loadAllChats();
                 this.conversationHistory = this.loadConversationHistory();
+                this.connectionRetries = 0;
+                this.maxRetries = 3;
+                
+                // Demo responses for offline mode
+                this.demoResponses = [
+                    "I'm currently running in demo mode. The API connection seems to be unavailable from GitHub Pages due to CORS restrictions.",
+                    "This is a demonstration response. In normal mode, I would connect to the Sky GPT API for intelligent responses.",
+                    "Demo mode is active. Try hosting this locally or on a server that supports CORS to enable full functionality.",
+                    "I'm responding in offline demo mode. The full Sky GPT experience requires proper API access.",
+                    "This is a simulated response. For real AI conversations, please check the API connectivity."
+                ];
                 
                 this.init();
             }
@@ -1015,7 +1102,12 @@
                 this.newChatBtn.addEventListener('click', () => this.createNewChat());
 
                 // Initialize highlight.js
-                hljs.highlightAll();
+                if (typeof hljs !== 'undefined') {
+                    hljs.highlightAll();
+                }
+
+                // Test API connectivity
+                this.testApiConnectivity();
 
                 // Update UI based on current model
                 this.updateModelButton();
@@ -1027,6 +1119,56 @@
                 // Show intro message only if no conversation history exists
                 if (this.conversationHistory.length === 0) {
                     this.showIntroMessage();
+                }
+            }
+
+            async testApiConnectivity() {
+                console.log('Testing API connectivity...');
+                
+                for (const [key, config] of Object.entries(this.apiConfigs)) {
+                    if (key === 'demo') continue;
+                    
+                    try {
+                        const testUrl = config.proxy ? 
+                            config.url + '?prompt=' + encodeURIComponent('test') :
+                            config.url + '?prompt=test&_t=' + Date.now();
+                        
+                        console.log(`Testing ${key}:`, testUrl);
+                        
+                        const response = await fetch(testUrl, {
+                            method: 'GET',
+                            headers: {
+                                'Accept': 'application/json',
+                                'Cache-Control': 'no-cache'
+                            },
+                            timeout: 5000
+                        });
+
+                        if (response.ok) {
+                            console.log(`✅ ${key} API is accessible`);
+                            this.currentApiConfig = config;
+                            this.updateConnectionStatus(true);
+                            return;
+                        }
+                    } catch (error) {
+                        console.warn(`❌ ${key} API failed:`, error.message);
+                    }
+                }
+                
+                console.log('🔄 All APIs failed, switching to demo mode');
+                this.currentApiConfig = this.apiConfigs.demo;
+                this.currentModel = 'demo';
+                this.updateConnectionStatus(false);
+                this.updateModelButton();
+            }
+
+            updateConnectionStatus(isOnline) {
+                if (isOnline) {
+                    this.connectionStatus.textContent = 'Online';
+                    this.connectionStatus.className = 'connection-status status-online';
+                } else {
+                    this.connectionStatus.textContent = 'Offline';
+                    this.connectionStatus.className = 'connection-status status-offline';
                 }
             }
 
@@ -1043,9 +1185,9 @@
             updateModelButton() {
                 const modelNames = {
                     'sky': 'Sky',
+                    'demo': 'Demo',
                     'researching': 'R',
-                    'reasoning': 'Rs',
-                    'canva': 'C'
+                    'reasoning': 'Rs'
                 };
                 this.modelBtn.textContent = modelNames[this.currentModel] || 'Sky';
             }
@@ -1069,19 +1211,21 @@
                 this.setCurrentModel(model);
                 this.closeModelModal();
                 
+                // Update API config based on model
+                if (model === 'demo') {
+                    this.currentApiConfig = this.apiConfigs.demo;
+                    this.updateConnectionStatus(false);
+                } else if (model === 'sky') {
+                    // Try to reconnect to API
+                    this.testApiConnectivity();
+                }
+                
                 // Show model switch message
                 const modelNames = {
                     'sky': 'Sky GPT',
-                    'canva': 'Canva Image Generator'
+                    'demo': 'Demo Mode (Offline)'
                 };
                 this.addMessage(`Switched to ${modelNames[model]} model.`, 'bot');
-                
-                // Update placeholder based on model
-                if (model === 'canva') {
-                    this.messageInput.placeholder = 'Describe the image you want to generate...';
-                } else {
-                    this.messageInput.placeholder = 'Type your message...';
-                }
             }
 
             getCurrentChatId() {
@@ -1157,11 +1301,7 @@
                 
                 // Display existing conversation history
                 this.conversationHistory.forEach(entry => {
-                    if (entry.type === 'image') {
-                        this.addImageToUI(entry.message, false);
-                    } else {
-                        this.addMessageToUI(entry.message, entry.type, false);
-                    }
+                    this.addMessageToUI(entry.message, entry.type, false);
                 });
             }
 
@@ -1273,65 +1413,38 @@
                 this.showTypingIndicator();
 
                 try {
-                    if (this.currentModel === 'canva') {
-                        await this.generateImage(message);
-                    } else {
-                        const response = await this.getBotResponse(message);
-                        this.removeTypingIndicator();
-                        this.addMessage(response, 'bot');
-                    }
+                    const response = await this.getBotResponse(message);
+                    this.removeTypingIndicator();
+                    this.addMessage(response, 'bot');
+                    this.connectionRetries = 0; // Reset retry counter on success
                 } catch (error) {
                     this.removeTypingIndicator();
-                    this.addMessage("Sorry, I'm having trouble responding. Please try again.", 'bot');
-                    console.error('Bot response error:', error);
+                    this.handleApiError(error, message);
                 } finally {
                     this.setProcessing(false);
                 }
             }
 
-            async generateImage(prompt) {
-                try {
-                    const url = `${this.imageApiUrl}?inputText=${encodeURIComponent(prompt)}`;
-                    
-                    console.log('Image API URL:', url);
-                    
-                    const response = await fetch(url, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json',
-                            'Cache-Control': 'no-cache'
-                        }
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                    }
-
-                    // The API returns the image directly
-                    const imageBlob = await response.blob();
-                    const imageUrl = URL.createObjectURL(imageBlob);
-                    
-                    this.removeTypingIndicator();
-                    this.addImage(imageUrl);
-                    
-                } catch (error) {
-                    console.error('Image generation error:', error);
-                    this.removeTypingIndicator();
-                    this.addMessage("Sorry, I couldn't generate the image. Please try again with a different description.", 'bot');
-                }
-            }
-
             async getBotResponse(userMessage) {
+                // Handle demo mode
+                if (this.currentApiConfig.url === 'demo') {
+                    return this.getDemoResponse();
+                }
+
                 // Build conversation context
                 const conversationContext = this.buildConversationContext(userMessage);
-                
-                // Create the full prompt
                 const fullPrompt = `${this.systemPrompt} ${conversationContext}`;
                 
-                const url = `${this.apiBaseUrl}?prompt=${encodeURIComponent(fullPrompt)}&_t=${Date.now()}`;
+                let url;
+                if (this.currentApiConfig.proxy) {
+                    // For CORS proxy
+                    url = this.currentApiConfig.url + '?prompt=' + encodeURIComponent(fullPrompt);
+                } else {
+                    // For direct API
+                    url = this.currentApiConfig.url + '?prompt=' + encodeURIComponent(fullPrompt) + '&_t=' + Date.now();
+                }
                 
-                console.log('API URL:', url);
-                console.log('Full Prompt:', fullPrompt);
+                console.log('API Request URL:', url);
                 
                 const response = await fetch(url, {
                     method: 'GET',
@@ -1355,7 +1468,7 @@
                     data = JSON.parse(textResponse);
                 } catch (parseError) {
                     console.log('Response is not JSON, treating as plain text');
-                    return textResponse.trim();
+                    return textResponse.trim() || this.getDemoResponse();
                 }
                 
                 console.log('Parsed API Data:', data);
@@ -1372,8 +1485,45 @@
                             return data[field].trim();
                         }
                     }
-                    throw new Error('No valid response field found');
+                    return this.getDemoResponse();
                 }
+            }
+
+            getDemoResponse() {
+                return this.demoResponses[Math.floor(Math.random() * this.demoResponses.length)];
+            }
+
+            handleApiError(error, userMessage) {
+                console.error('API Error:', error);
+                
+                this.connectionRetries++;
+                
+                if (this.connectionRetries <= this.maxRetries) {
+                    // Try next API configuration
+                    const apiKeys = Object.keys(this.apiConfigs);
+                    const currentIndex = apiKeys.findIndex(key => this.apiConfigs[key] === this.currentApiConfig);
+                    const nextIndex = (currentIndex + 1) % apiKeys.length;
+                    
+                    if (nextIndex !== currentIndex) {
+                        console.log(`Switching to API: ${apiKeys[nextIndex]}`);
+                        this.currentApiConfig = this.apiConfigs[apiKeys[nextIndex]];
+                        
+                        // Retry with new API
+                        setTimeout(() => {
+                            this.handleSendMessage();
+                        }, 1000);
+                        return;
+                    }
+                }
+                
+                // All APIs failed, switch to demo mode
+                this.currentApiConfig = this.apiConfigs.demo;
+                this.currentModel = 'demo';
+                this.updateModelButton();
+                this.updateConnectionStatus(false);
+                
+                const errorMessage = `Sorry, I'm having trouble connecting to the API (likely due to CORS restrictions on GitHub Pages). Switching to demo mode. ${this.getDemoResponse()}`;
+                this.addMessage(errorMessage, 'bot');
             }
 
             buildConversationContext(currentUserMessage) {
@@ -1401,45 +1551,6 @@
                 this.addMessageToUI(content, type, true);
             }
 
-            addImage(imageUrl) {
-                this.addImageToUI(imageUrl, true);
-            }
-
-            addImageToUI(imageUrl, saveToHistory = true) {
-                if (saveToHistory) {
-                    const historyEntry = {
-                        message: imageUrl,
-                        type: 'image',
-                        timestamp: Date.now()
-                    };
-                    
-                    this.conversationHistory.push(historyEntry);
-                    this.saveConversationHistory();
-                }
-
-                const messageDiv = document.createElement('div');
-                messageDiv.classList.add('message', 'bot-message');
-
-                const bubbleDiv = document.createElement('div');
-                bubbleDiv.classList.add('message-bubble', 'bot-bubble');
-                
-                const imageDiv = document.createElement('div');
-                imageDiv.classList.add('image-message');
-                
-                const img = document.createElement('img');
-                img.src = imageUrl;
-                img.alt = 'Generated image';
-                img.style.maxWidth = '100%';
-                img.style.borderRadius = '12px';
-                
-                imageDiv.appendChild(img);
-                bubbleDiv.appendChild(imageDiv);
-                messageDiv.appendChild(bubbleDiv);
-                this.messagesContainer.appendChild(messageDiv);
-
-                this.scrollToBottom();
-            }
-
             addMessageToUI(content, type, saveToHistory = true) {
                 if (saveToHistory) {
                     const historyEntry = {
@@ -1463,9 +1574,12 @@
                 messageDiv.appendChild(bubbleDiv);
                 this.messagesContainer.appendChild(messageDiv);
 
-                bubbleDiv.querySelectorAll('pre code').forEach((block) => {
-                    hljs.highlightElement(block);
-                });
+                // Apply syntax highlighting if available
+                if (typeof hljs !== 'undefined') {
+                    bubbleDiv.querySelectorAll('pre code').forEach((block) => {
+                        hljs.highlightElement(block);
+                    });
+                }
 
                 this.scrollToBottom();
             }
@@ -1607,4 +1721,3 @@
     </script>
 </body>
 </html>
-
